@@ -66,10 +66,8 @@ From the project root (after activating the venv):
 bash scripts/run_all_experiments.sh
 ```
 
-**Quick smoke run** (reduced data / steps — implementation-specific):
 
 ```bash
-bash scripts/run_all_experiments.sh --quick
 ```
 
 **Skip specific phases** (e.g., reuse existing indices):
