@@ -1,0 +1,86 @@
+policy:
+  model: "Qwen/Qwen3.5-4B"
+  hf_endpoint: "https://hf-mirror.com"
+  lora:
+    r: 32
+    lora_alpha: 64
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+actions:
+  - name: "no_retrieve"
+    cost: 0.0
+    description: "Answer directly without retrieval"
+  - name: "retrieve_1"
+    cost: 0.1
+    k: 1
+  - name: "retrieve_3"
+    cost: 0.3
+    k: 3
+  - name: "retrieve_5"
+    cost: 0.5
+    k: 5
+  - name: "retrieve_10"
+    cost: 1.0
+    k: 10
+  - name: "rewrite"
+    cost: 0.2
+    description: "Rewrite query then retrieve"
+  - name: "multi_hop"
+    cost: 1.5
+    description: "Multi-hop retrieval (2 rounds)"
+
+environment:
+  retriever_model: "BAAI/bge-large-en-v1.5"
+  generator_model: "Qwen/Qwen3.5-9B"
+  cost_lambda: 0.3
+  accuracy_weight: 1.0
+  max_context_tokens: 2048
+  chunk_size: 256
+
+grpo:
+  num_generations: 8
+  temperature: 0.7
+  kl_coeff: 0.05
+  clip_range: 0.2
+  gamma: 0.99
+  value_loss_coeff: 0.5
+  entropy_coeff: 0.01
+
+training:
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2
+  num_train_epochs: 10
+  learning_rate: 5.0e-5
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  bf16: true
+  logging_steps: 20
+  save_steps: 500
+  max_seq_length: 1024
+  gradient_checkpointing: true
+
+evaluation:
+  datasets:
+    - name: "natural_questions"
+      dataset_id: "google-research-datasets/natural_questions"
+      split: "validation"
+      max_samples: 1000
+    - name: "triviaqa"
+      dataset_id: "mandarjoshi/trivia_qa"
+      subset: "rc"
+      split: "validation"
+      max_samples: 1000
+    - name: "hotpotqa"
+      dataset_id: "hotpot_qa"
+      subset: "fullwiki"
+      split: "validation"
+      max_samples: 1000
+    - name: "fever"
+      dataset_id: "fever"
+      subset: "v1.0"
+      split: "paper_test"
+      max_samples: 1000
+  pareto_lambdas: [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0]
+
+output_dir: "./outputs"

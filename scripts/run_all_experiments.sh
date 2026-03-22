@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# =============================================================================
+# SmartRAG — master experiment pipeline
+# Graph-contrastive retrieval (GraphConRAG) + cost-aware RL policy (UniRAG-Policy)
+# =============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${PROJECT_ROOT}"
+
+# -----------------------------------------------------------------------------
+# Optional: activate local virtual environment (create with: python -m venv .venv)
+# -----------------------------------------------------------------------------
+if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+  # shellcheck source=/dev/null
+  source "${PROJECT_ROOT}/.venv/bin/activate"
+elif [[ -f "${PROJECT_ROOT}/venv/bin/activate" ]]; then
+  # shellcheck source=/dev/null
+  source "${PROJECT_ROOT}/venv/bin/activate"
+fi
+
+# -----------------------------------------------------------------------------
+# Shared GPU utilities (NeurIPS monorepo layout)
+# -----------------------------------------------------------------------------
+# shellcheck source=/dev/null
+source "$(dirname "$0")/../../_shared/gpu_utils.sh" 2>/dev/null || source "$(dirname "$0")/../gpu_utils.sh"
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
+QUICK=0
+SKIP_PHASES=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quick)
+      QUICK=1
+      shift
+      ;;
+    --skip-phase)
+      [[ $# -ge 2 ]] || { echo "Usage: $0 [--quick] [--skip-phase N] ..."; exit 1; }
+      SKIP_PHASES+=("$2")
+      shift 2
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: run_all_experiments.sh [options]
+
+  --quick              Use reduced data / fewer steps for smoke tests and debugging.
+  --skip-phase N       Skip phase N (0–8). May be repeated.
+
+Phases:
+  0  Setup RAG infrastructure (BM25 + FAISS)
+  1  Build synonym graph
+  2  Train graph-contrastive retriever
+  3  Evaluate retriever (BM25, DPR, BGE, BGE+Graph)
+  4  Train oracle retrieval policy
+  5  Train GRPO retrieval policy
+  6  Evaluate policy (no-retrieve, always, oracle, learned)
+  7  Combined graph retriever + policy evaluation
+  8  Ablations
+
+Requires: NVIDIA GPU(s), Python venv with requirements installed, HF datasets access.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+EXTRA_ARGS=()
+if [[ "${QUICK}" -eq 1 ]]; then
+  EXTRA_ARGS+=(--quick)
+fi
+
+should_run_phase() {
+  local p="$1"
+  for s in "${SKIP_PHASES[@]}"; do
+    [[ "$s" == "$p" ]] && return 1
+  done
+  return 0
+}
+
+run_py() {
+  local script="$1"
+  shift
+  echo "============================================================================"
+  echo " Running: python ${script} $*"
+  echo "============================================================================"
+  python "${PROJECT_ROOT}/${script}" "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Environment & GPUs
+# -----------------------------------------------------------------------------
+auto_setup
+
+echo ""
+echo "============================================"
+echo " SmartRAG full pipeline"
+echo "  Project root : ${PROJECT_ROOT}"
+echo "  Quick mode   : ${QUICK}"
+if [[ ${#SKIP_PHASES[@]} -eq 0 ]]; then
+  echo "  Skip phases  : none"
+else
+  echo "  Skip phases  : ${SKIP_PHASES[*]}"
+fi
+echo "============================================"
+echo ""
+
+# -----------------------------------------------------------------------------
+# Phase 0: RAG infrastructure — BM25 corpora + dense FAISS index
+# -----------------------------------------------------------------------------
+if should_run_phase 0; then
+  run_py scripts/setup_rag_infrastructure.py "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 1: Synonym / lexical graph for graph-supervised contrastive signals
+# -----------------------------------------------------------------------------
+if should_run_phase 1; then
+  run_py scripts/build_synonym_graph.py "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 2: Graph-contrastive retriever training (GraphConRAG)
+# -----------------------------------------------------------------------------
+if should_run_phase 2; then
+  TORCHRUN="$(get_torchrun_cmd)"
+  # shellcheck disable=SC2086
+  echo "============================================================================"
+  echo " Phase 2: ${TORCHRUN} scripts/train_contrastive_retriever.py ..."
+  echo "============================================================================"
+  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_contrastive_retriever.py" "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 3: Retriever comparison — BM25, DPR, BGE, BGE+Graph
+# -----------------------------------------------------------------------------
+if should_run_phase 3; then
+  run_py scripts/eval_rag_pipeline.py "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 4: Oracle (upper-bound) retrieval policy for supervised references
+# -----------------------------------------------------------------------------
+if should_run_phase 4; then
+  TORCHRUN="$(get_torchrun_cmd)"
+  # shellcheck disable=SC2086
+  echo "============================================================================"
+  echo " Phase 4: ${TORCHRUN} scripts/train_oracle_policy.py ..."
+  echo "============================================================================"
+  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_oracle_policy.py" "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 5: GRPO-trained cost-aware policy (UniRAG-Policy)
+# -----------------------------------------------------------------------------
+if should_run_phase 5; then
+  TORCHRUN="$(get_torchrun_cmd)"
+  # shellcheck disable=SC2086
+  echo "============================================================================"
+  echo " Phase 5: ${TORCHRUN} scripts/train_grpo_policy.py ..."
+  echo "============================================================================"
+  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_grpo_policy.py" "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 6: Policy evaluation — no-retrieve, always-retrieve, oracle, learned
+# -----------------------------------------------------------------------------
+if should_run_phase 6; then
+  run_py scripts/eval_rag_policy.py "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 7: End-to-end — graph-enhanced retriever + adaptive policy
+# -----------------------------------------------------------------------------
+if should_run_phase 7; then
+  run_py scripts/eval_combined_rag.py "${EXTRA_ARGS[@]}"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 8: Ablations (graph edges, contrastive negatives, policy reward shaping, etc.)
+# -----------------------------------------------------------------------------
+if should_run_phase 8; then
+  run_py scripts/run_ablations.py "${EXTRA_ARGS[@]}"
+fi
+
+echo ""
+echo "============================================"
+echo " SmartRAG pipeline completed successfully."
+echo "============================================"

@@ -1,0 +1,72 @@
+graph:
+  wordnet_pos: ["n", "v", "a", "r"]
+  max_synsets_per_word: 10
+  min_word_freq: 5
+  polysemy_threshold: 2
+  llm_paraphrase_model: "Qwen/Qwen3.5-9B"
+  llm_batch_size: 32
+  max_graph_nodes: 500000
+  max_edges_per_node: 50
+  edge_types: ["synonym", "hypernym", "polysemy", "paraphrase"]
+  embedding_model: "BAAI/bge-large-en-v1.5"
+  node_embedding_dim: 1024
+
+retriever:
+  base_model: "BAAI/bge-large-en-v1.5"
+  hidden_dim: 1024
+  graph_gnn_layers: 3
+  graph_gnn_type: "GAT"
+  gnn_heads: 8
+  gnn_dropout: 0.1
+  contrastive_temperature: 0.05
+  graph_laplacian_weight: 0.1
+  hard_negative_ratio: 0.3
+  in_batch_negatives: true
+
+training:
+  per_device_train_batch_size: 32
+  gradient_accumulation_steps: 2
+  num_train_epochs: 10
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  bf16: true
+  logging_steps: 50
+  save_steps: 500
+  max_seq_length: 512
+  dataloader_num_workers: 8
+  weight_decay: 0.01
+
+rag:
+  generator_model: "Qwen/Qwen3.5-9B"
+  top_k: 10
+  rerank_top_k: 5
+  chunk_size: 256
+  chunk_overlap: 64
+  max_context_length: 2048
+  max_new_tokens: 512
+
+hf_endpoint: "https://hf-mirror.com"
+output_dir: "./outputs"
+
+evaluation:
+  datasets:
+    - name: "natural_questions"
+      dataset_id: "google-research-datasets/natural_questions"
+      split: "validation"
+      max_samples: 2000
+    - name: "triviaqa"
+      dataset_id: "mandarjoshi/trivia_qa"
+      subset: "rc"
+      split: "validation"
+      max_samples: 2000
+    - name: "hotpotqa"
+      dataset_id: "hotpot_qa"
+      subset: "fullwiki"
+      split: "validation"
+      max_samples: 2000
+    - name: "ambigqa"
+      dataset_id: "sewon/ambigqa"
+      split: "validation"
+      max_samples: 1000
+  metrics: ["exact_match", "f1", "recall@k", "mrr"]
