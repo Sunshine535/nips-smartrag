@@ -16,13 +16,16 @@ import os
 import random
 import sys
 from collections import defaultdict
+from contextlib import nullcontext
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import yaml
 from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model
+from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
@@ -140,7 +143,11 @@ def get_annealed_cost_lambda(step, total_steps, start, final, anneal_fraction):
 
 
 def grpo_update(policy_model, tokenizer, rollout_buffer, optimizer, config, device):
-    """GRPO update with group-relative advantages."""
+    """GRPO update with group-relative advantages (DDP-compatible).
+
+    Uses model.no_sync() for all backward passes except the last one,
+    so DDP only performs one all-reduce per batch instead of per sample.
+    """
     grpo_cfg = config["grpo"]
     clip_range = grpo_cfg["clip_range"]
     kl_coeff = grpo_cfg["kl_coeff"]
@@ -153,20 +160,28 @@ def grpo_update(policy_model, tokenizer, rollout_buffer, optimizer, config, devi
     for item in rollout_buffer:
         query_groups[item["query_id"]].append(item)
 
-    total_policy_loss = 0.0
-    total_entropy = 0.0
-    num_updates = 0
-
+    update_items = []
     for qid, group in query_groups.items():
         if len(group) < 2:
             continue
-
         rewards = torch.tensor([g["reward"] for g in group], device=device)
         mean_r = rewards.mean()
         std_r = rewards.std().clamp(min=1e-8)
         advantages = (rewards - mean_r) / std_r
-
         for g, adv in zip(group, advantages):
+            update_items.append((g, adv))
+
+    if not update_items:
+        return {}
+
+    total_policy_loss = 0.0
+    total_entropy = 0.0
+    n = len(update_items)
+    no_sync_fn = getattr(policy_model, "no_sync", None)
+
+    for i, (g, adv) in enumerate(update_items):
+        sync_ctx = no_sync_fn() if (i < n - 1 and no_sync_fn) else nullcontext()
+        with sync_ctx:
             inputs = tokenizer(
                 g["prompt"], return_tensors="pt", truncation=True, max_length=512,
             ).to(device)
@@ -192,22 +207,22 @@ def grpo_update(policy_model, tokenizer, rollout_buffer, optimizer, config, devi
             entropy = -(probs * log_probs).sum()
             kl_penalty = kl_coeff * (old_log_prob - log_prob)
 
-            loss = policy_loss + kl_penalty - entropy_coeff * entropy
+            loss = (policy_loss + kl_penalty - entropy_coeff * entropy) / n
             loss.backward()
 
-            total_policy_loss += policy_loss.item()
-            total_entropy += entropy.item()
-            num_updates += 1
+        total_policy_loss += policy_loss.item()
+        total_entropy += entropy.item()
 
-    if num_updates > 0:
-        torch.nn.utils.clip_grad_norm_(policy_model.parameters(), 1.0)
-        optimizer.step()
-        optimizer.zero_grad()
+    torch.nn.utils.clip_grad_norm_(
+        [p for p in policy_model.parameters() if p.requires_grad], 1.0
+    )
+    optimizer.step()
+    optimizer.zero_grad()
 
     return {
-        "policy_loss": total_policy_loss / max(num_updates, 1),
-        "entropy": total_entropy / max(num_updates, 1),
-        "num_updates": num_updates,
+        "policy_loss": total_policy_loss / n,
+        "entropy": total_entropy / n,
+        "num_updates": n,
     }
 
 
@@ -224,13 +239,20 @@ def main():
         config = yaml.safe_load(f)
 
     local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if local_rank >= 0:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{max(local_rank, 0)}" if torch.cuda.is_available() else "cpu")
+    is_main = local_rank <= 0
 
     policy_model_name = config["policy"]["model"]
-    logger.info("=== UniRAG GRPO Policy Training ===")
-    logger.info(f"Policy model: {policy_model_name}")
-    logger.info(f"Cost annealing: {args.cost_lambda_start} → {args.cost_lambda_final} "
-                f"over {args.cost_annealing_fraction:.0%} of training")
+    if is_main:
+        logger.info("=== UniRAG GRPO Policy Training ===")
+        logger.info(f"Policy model: {policy_model_name}")
+        logger.info(f"Cost annealing: {args.cost_lambda_start} → {args.cost_lambda_final} "
+                    f"over {args.cost_annealing_fraction:.0%} of training")
+        logger.info(f"World size: {world_size}")
 
     tokenizer = AutoTokenizer.from_pretrained(policy_model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -240,8 +262,10 @@ def main():
         policy_model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map={"": max(local_rank, 0)} if torch.cuda.is_available() else "cpu",
+        attn_implementation="flash_attention_2",
+        low_cpu_mem_usage=True,
     )
+    policy_model = policy_model.to(device)
     policy_model.config.use_cache = False
 
     lora_cfg = config["policy"]["lora"]
@@ -254,9 +278,23 @@ def main():
         bias="none",
     )
     policy_model = get_peft_model(policy_model, peft_config)
-    policy_model.print_trainable_parameters()
+    if config["training"].get("gradient_checkpointing"):
+        policy_model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+    if is_main:
+        policy_model.print_trainable_parameters()
+
+    if local_rank >= 0:
+        policy_model = DDP(policy_model, device_ids=[local_rank], find_unused_parameters=True)
 
     queries = load_training_queries(args.data_dir, config)
+    if world_size > 1:
+        per_rank = len(queries) // world_size
+        start = local_rank * per_rank
+        queries = queries[start:start + per_rank]
+        if is_main:
+            logger.info(f"Data split: {per_rank} queries/rank ({per_rank * world_size} total)")
 
     train_cfg = config["training"]
     grpo_cfg = config["grpo"]
@@ -356,7 +394,7 @@ def main():
             )
             reward_fn.cost_lambda = step_cost_lambda
 
-            if global_step % train_cfg["logging_steps"] == 0:
+            if is_main and global_step % train_cfg["logging_steps"] == 0:
                 recent_n = min(200, len(epoch_rewards))
                 avg_reward = np.mean(epoch_rewards[-recent_n:])
                 avg_cost = np.mean(epoch_costs[-recent_n:])
@@ -369,9 +407,10 @@ def main():
                     f"Ent={update_info.get('entropy', 0):.4f}"
                 )
 
-            if global_step % train_cfg["save_steps"] == 0:
+            if is_main and global_step % train_cfg["save_steps"] == 0:
                 ckpt_dir = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                policy_model.save_pretrained(ckpt_dir)
+                save_model = policy_model.module if hasattr(policy_model, "module") else policy_model
+                save_model.save_pretrained(ckpt_dir)
                 tokenizer.save_pretrained(ckpt_dir)
 
         total_actions = sum(action_counts.values())
@@ -388,33 +427,39 @@ def main():
         }
         training_log.append(epoch_log)
 
-        logger.info(
-            f"=== Epoch {epoch} complete | Reward={epoch_log['avg_reward']:.4f} "
-            f"Cost={epoch_log['avg_cost']:.4f} Acc={epoch_log['avg_accuracy']:.4f} "
-            f"λ={cost_lambda:.3f} ==="
-        )
-        logger.info(f"  Action dist: {action_dist}")
+        if is_main:
+            logger.info(
+                f"=== Epoch {epoch} complete | Reward={epoch_log['avg_reward']:.4f} "
+                f"Cost={epoch_log['avg_cost']:.4f} Acc={epoch_log['avg_accuracy']:.4f} "
+                f"λ={cost_lambda:.3f} ==="
+            )
+            logger.info(f"  Action dist: {action_dist}")
 
-    policy_model.save_pretrained(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
+    if is_main:
+        save_model = policy_model.module if hasattr(policy_model, "module") else policy_model
+        save_model.save_pretrained(args.output_dir)
+        tokenizer.save_pretrained(args.output_dir)
 
-    with open(os.path.join(args.output_dir, "training_log.json"), "w") as f:
-        json.dump(training_log, f, indent=2)
+        with open(os.path.join(args.output_dir, "training_log.json"), "w") as f:
+            json.dump(training_log, f, indent=2)
 
-    summary = {
-        "model": policy_model_name,
-        "num_epochs": num_epochs,
-        "num_generations": num_generations,
-        "cost_lambda_start": args.cost_lambda_start,
-        "cost_lambda_final": args.cost_lambda_final,
-        "final_avg_reward": training_log[-1]["avg_reward"] if training_log else None,
-        "final_avg_cost": training_log[-1]["avg_cost"] if training_log else None,
-        "final_avg_accuracy": training_log[-1]["avg_accuracy"] if training_log else None,
-    }
-    with open(os.path.join(args.output_dir, "training_summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+        summary = {
+            "model": policy_model_name,
+            "num_epochs": num_epochs,
+            "num_generations": num_generations,
+            "cost_lambda_start": args.cost_lambda_start,
+            "cost_lambda_final": args.cost_lambda_final,
+            "final_avg_reward": training_log[-1]["avg_reward"] if training_log else None,
+            "final_avg_cost": training_log[-1]["avg_cost"] if training_log else None,
+            "final_avg_accuracy": training_log[-1]["avg_accuracy"] if training_log else None,
+        }
+        with open(os.path.join(args.output_dir, "training_summary.json"), "w") as f:
+            json.dump(summary, f, indent=2)
 
-    logger.info(f"=== Training complete. Model saved to {args.output_dir} ===")
+        logger.info(f"=== Training complete. Model saved to {args.output_dir} ===")
+
+    if local_rank >= 0:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

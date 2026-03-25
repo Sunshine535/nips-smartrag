@@ -278,6 +278,7 @@ def main():
     polysemy_groups = build_polysemy_groups(graph) if graph else []
 
     if local_rank >= 0:
+        encoder = DDP(encoder, device_ids=[local_rank], find_unused_parameters=False)
         retriever = DDP(retriever, device_ids=[local_rank], find_unused_parameters=True)
 
     dataset = load_training_data(config, tokenizer)

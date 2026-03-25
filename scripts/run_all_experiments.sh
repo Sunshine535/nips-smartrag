@@ -28,7 +28,7 @@ fi
 # Shared GPU utilities (NeurIPS monorepo layout)
 # -----------------------------------------------------------------------------
 # shellcheck source=/dev/null
-source "$(dirname "$0")/../../_shared/gpu_utils.sh" 2>/dev/null || source "$(dirname "$0")/../gpu_utils.sh"
+source "${SCRIPT_DIR}/../../_shared/gpu_utils.sh" 2>/dev/null || source "${SCRIPT_DIR}/gpu_utils.sh"
 
 # -----------------------------------------------------------------------------
 # CLI
@@ -82,6 +82,7 @@ fi
 
 should_run_phase() {
   local p="$1"
+  [[ ${#SKIP_PHASES[@]} -eq 0 ]] && return 0
   for s in "${SKIP_PHASES[@]}"; do
     [[ "$s" == "$p" ]] && return 1
   done
@@ -152,12 +153,7 @@ fi
 # Phase 4: Oracle (upper-bound) retrieval policy for supervised references
 # -----------------------------------------------------------------------------
 if should_run_phase 4; then
-  TORCHRUN="$(get_torchrun_cmd)"
-  # shellcheck disable=SC2086
-  echo "============================================================================"
-  echo " Phase 4: ${TORCHRUN} scripts/train_oracle_policy.py ..."
-  echo "============================================================================"
-  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_oracle_policy.py" "${EXTRA_ARGS[@]}"
+  run_py scripts/train_oracle_policy.py "${EXTRA_ARGS[@]}"
 fi
 
 # -----------------------------------------------------------------------------
