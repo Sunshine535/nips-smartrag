@@ -7,6 +7,22 @@ set -e
 PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJ_DIR"
 
+# ====== 插入这段 ======
+export UV_CACHE_DIR="/tmp/uv-cache-$(hostname)"
+mkdir -p "$UV_CACHE_DIR"
+
+if [ -L "$PROJ_DIR/.venv" ]; then
+    rm -f "$PROJ_DIR/.venv"
+elif [ -d "$PROJ_DIR/.venv" ]; then
+    if [ ! -f "$PROJ_DIR/.venv/bin/activate" ] || \
+       ! "$PROJ_DIR/.venv/bin/python" --version &>/dev/null; then
+        echo "[FIX] .venv is broken, removing..."
+        rm -rf "$PROJ_DIR/.venv" 2>/dev/null || \
+            mv "$PROJ_DIR/.venv" "/tmp/.venv_dead_$(date +%s)" 2>/dev/null || true
+    fi
+fi
+# ====== 插入结束 ======
+
 echo "============================================================"
 echo " Starting full experiment pipeline"
 echo " Project: $(basename "$PROJ_DIR")"
