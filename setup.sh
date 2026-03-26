@@ -26,21 +26,13 @@ else
 fi
 source "$VENV_DIR/bin/activate"
 
-# --- Install PyTorch 2.10 + CUDA 12.8 ---
-echo "[3/5] Installing PyTorch 2.10.0 + CUDA 12.8 ..."
+# --- Install PyTorch CUDA + project dependencies (single resolve) ---
+echo "[3/5] Installing PyTorch 2.10.0 + CUDA 12.8 + project deps ..."
 uv pip install "torch==2.10.0" "torchvision" "torchaudio" \
-    --index-url https://download.pytorch.org/whl/cu128
-
-# --- Install project dependencies (alibaba mirror) ---
-echo "[4/5] Installing project dependencies ..."
-uv pip install -r "$PROJ_DIR/requirements.txt" \
-    --index-url https://mirrors.aliyun.com/pypi/simple/ \
-    --extra-index-url https://download.pytorch.org/whl/cu128 \
+    -r "$PROJ_DIR/requirements.txt" \
+    --index-url https://download.pytorch.org/whl/cu128 \
+    --extra-index-url https://mirrors.aliyun.com/pypi/simple/ \
     --index-strategy unsafe-best-match
-
-# --- Re-ensure PyTorch CUDA (pip mirror may have pulled CPU-only torch) ---
-uv pip install "torch==2.10.0" "torchvision" "torchaudio" \
-    --index-url https://download.pytorch.org/whl/cu128 --reinstall-package torch
 
 # --- Optional: flash-attention ---
 echo "[5/5] Installing flash-attn (optional) ..."
