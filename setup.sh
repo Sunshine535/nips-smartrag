@@ -38,6 +38,10 @@ uv pip install -r "$PROJ_DIR/requirements.txt" \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --index-strategy unsafe-best-match
 
+# --- Re-ensure PyTorch CUDA (pip mirror may have pulled CPU-only torch) ---
+uv pip install "torch==2.10.0" "torchvision" "torchaudio" \
+    --index-url https://download.pytorch.org/whl/cu128 --reinstall-package torch
+
 # --- Optional: flash-attention ---
 echo "[5/5] Installing flash-attn (optional) ..."
 uv pip install flash-attn --no-build-isolation 2>/dev/null || echo "  flash-attn skipped (optional)"
