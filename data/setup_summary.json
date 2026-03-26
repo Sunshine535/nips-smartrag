@@ -1,0 +1,40 @@
+{
+  "num_passages": 10000,
+  "bm25_built": true,
+  "dense_built": true,
+  "embedding_model": "BAAI/bge-large-en-v1.5",
+  "dataset_stats": {
+    "natural_questions": {
+      "total_samples": 1000,
+      "path": "./data/datasets/natural_questions.jsonl"
+    },
+    "triviaqa": {
+      "total_samples": 1000,
+      "path": "./data/datasets/triviaqa.jsonl"
+    },
+    "hotpotqa": {
+      "total_samples": 1000,
+      "path": "./data/datasets/hotpotqa.jsonl"
+    },
+    "fever": {
+      "error": "Dataset scripts are no longer supported, but found fever.py"
+    }
+  },
+  "retrieval_quality": {
+    "natural_questions": {
+      "bm25_recall@20": 1.0,
+      "dense_recall@20": 1.0,
+      "n_queries": 100
+    },
+    "triviaqa": {
+      "bm25_recall@20": 0.0,
+      "dense_recall@20": 0.0,
+      "n_queries": 100
+    },
+    "hotpotqa": {
+      "bm25_recall@20": 0.0,
+      "dense_recall@20": 0.02,
+      "n_queries": 100
+    }
+  }
+}

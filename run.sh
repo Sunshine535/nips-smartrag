@@ -29,15 +29,11 @@ echo " Project: $(basename "$PROJ_DIR")"
 echo " Time:    $(date)"
 echo "============================================================"
 
-# Step 1: Setup environment (skip if already done)
-if [ ! -f "$PROJ_DIR/.venv/bin/activate" ]; then
-    echo ""
-    echo "[1/2] Setting up environment..."
-    bash setup.sh
-else
-    echo ""
-    echo "[1/2] Environment already set up (.venv exists)"
-fi
+# Step 1: Setup environment 
+echo ""
+echo "[1/2] Syncing environment (Ensuring up-to-date)..."
+bash setup.sh
+source "$PROJ_DIR/.venv/bin/activate"
 
 # Step 2: Run all experiments with real-time output + log file
 echo ""
