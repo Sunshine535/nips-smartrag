@@ -76,8 +76,13 @@ EOF
 done
 
 EXTRA_ARGS=()
+QUICK_PHASE0=()
+QUICK_PHASE1=()
+QUICK_PHASE4=()
 if [[ "${QUICK}" -eq 1 ]]; then
-  EXTRA_ARGS+=(--quick)
+  QUICK_PHASE0=(--max_passages 500 --batch_size 32)
+  QUICK_PHASE1=(--max_articles 200)
+  QUICK_PHASE4=(--max_queries_per_dataset 50)
 fi
 
 should_run_phase() {
@@ -120,14 +125,14 @@ echo ""
 # Phase 0: RAG infrastructure — BM25 corpora + dense FAISS index
 # -----------------------------------------------------------------------------
 if should_run_phase 0; then
-  run_py scripts/setup_rag_infrastructure.py "${EXTRA_ARGS[@]}"
+  run_py scripts/setup_rag_infrastructure.py "${QUICK_PHASE0[@]}"
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 1: Synonym / lexical graph for graph-supervised contrastive signals
 # -----------------------------------------------------------------------------
 if should_run_phase 1; then
-  run_py scripts/build_synonym_graph.py "${EXTRA_ARGS[@]}"
+  run_py scripts/build_synonym_graph.py "${QUICK_PHASE1[@]}"
 fi
 
 # -----------------------------------------------------------------------------
@@ -139,21 +144,21 @@ if should_run_phase 2; then
   echo "============================================================================"
   echo " Phase 2: ${TORCHRUN} scripts/train_contrastive_retriever.py ..."
   echo "============================================================================"
-  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_contrastive_retriever.py" "${EXTRA_ARGS[@]}"
+  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_contrastive_retriever.py"
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 3: Retriever comparison — BM25, DPR, BGE, BGE+Graph
 # -----------------------------------------------------------------------------
 if should_run_phase 3; then
-  run_py scripts/eval_rag_pipeline.py "${EXTRA_ARGS[@]}"
+  run_py scripts/eval_rag_pipeline.py
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 4: Oracle (upper-bound) retrieval policy for supervised references
 # -----------------------------------------------------------------------------
 if should_run_phase 4; then
-  run_py scripts/train_oracle_policy.py "${EXTRA_ARGS[@]}"
+  run_py scripts/train_oracle_policy.py "${QUICK_PHASE4[@]}"
 fi
 
 # -----------------------------------------------------------------------------
@@ -165,28 +170,28 @@ if should_run_phase 5; then
   echo "============================================================================"
   echo " Phase 5: ${TORCHRUN} scripts/train_grpo_policy.py ..."
   echo "============================================================================"
-  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_grpo_policy.py" "${EXTRA_ARGS[@]}"
+  ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_grpo_policy.py"
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 6: Policy evaluation — no-retrieve, always-retrieve, oracle, learned
 # -----------------------------------------------------------------------------
 if should_run_phase 6; then
-  run_py scripts/eval_rag_policy.py "${EXTRA_ARGS[@]}"
+  run_py scripts/eval_rag_policy.py
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 7: End-to-end — graph-enhanced retriever + adaptive policy
 # -----------------------------------------------------------------------------
 if should_run_phase 7; then
-  run_py scripts/eval_combined_rag.py "${EXTRA_ARGS[@]}"
+  run_py scripts/eval_combined_rag.py
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 8: Ablations (graph edges, contrastive negatives, policy reward shaping, etc.)
 # -----------------------------------------------------------------------------
 if should_run_phase 8; then
-  run_py scripts/run_ablations.py "${EXTRA_ARGS[@]}"
+  run_py scripts/run_ablations.py
 fi
 
 echo ""
