@@ -8,7 +8,7 @@ PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJ_DIR"
 
 # ====== 插入这段 ======
-export UV_CACHE_DIR="/tmp/uv-cache-$(hostname)"
+export UV_CACHE_DIR="$PROJ_DIR/.uv_cache"
 mkdir -p "$UV_CACHE_DIR"
 
 if [ -L "$PROJ_DIR/.venv" ]; then
@@ -21,6 +21,7 @@ elif [ -d "$PROJ_DIR/.venv" ]; then
             mv "$PROJ_DIR/.venv" "/tmp/.venv_dead_$(date +%s)" 2>/dev/null || true
     fi
 fi
+
 # ====== 插入结束 ======
 
 echo "============================================================"
