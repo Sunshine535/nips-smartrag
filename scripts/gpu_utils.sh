@@ -138,8 +138,7 @@ YAML
 
 # Common environment setup
 setup_env() {
-    export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-    export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+        export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TRANSFORMERS_CACHE="${HF_HOME}/hub"
     export TOKENIZERS_PARALLELISM=false
     export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-0}"

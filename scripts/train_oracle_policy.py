@@ -239,8 +239,7 @@ def main():
     args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-    os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(args.output_dir, exist_ok=True)
 
     with open(args.config) as f:
         config = yaml.safe_load(f)

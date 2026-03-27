@@ -31,7 +31,7 @@ echo "[3/5] Installing PyTorch 2.10.0 + CUDA 12.8 + project deps ..."
 uv pip install "torch==2.10.0" "torchvision" "torchaudio" \
     -r "$PROJ_DIR/requirements.txt" \
     --index-url https://download.pytorch.org/whl/cu128 \
-    --extra-index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
     --index-strategy unsafe-best-match
 
 # --- Optional: flash-attention (skip if already attempted) ---

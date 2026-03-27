@@ -19,7 +19,6 @@ from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.graph_retriever import GraphContrastiveRetriever

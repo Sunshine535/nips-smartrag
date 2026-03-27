@@ -10,3 +10,8 @@ __pycache__/
 .venv/
 *.egg-info/
 wandb/
+
+# Claude local artifacts
+CLAUDE.md
+skills/
+templates/

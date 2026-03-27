@@ -46,7 +46,6 @@ rag:
   max_context_length: 2048
   max_new_tokens: 512
 
-hf_endpoint: "https://hf-mirror.com"
 output_dir: "./outputs"
 
 evaluation:

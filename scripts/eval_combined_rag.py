@@ -32,7 +32,6 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("eval_combined")
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
