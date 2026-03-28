@@ -21,9 +21,20 @@ fi
 echo "[1/5] Using: $($PYTHON_CMD --version)"
 
 VENV_DIR="$PROJ_DIR/.venv"
+if [ -d "$VENV_DIR" ] && { [ ! -f "$VENV_DIR/bin/activate" ] || [ ! -x "$VENV_DIR/bin/python" ]; }; then
+    echo "[2/5] Removing incomplete .venv (missing bin/activate or python) ..."
+    rm -rf "$VENV_DIR"
+fi
 if [ ! -d "$VENV_DIR" ]; then
     echo "[2/5] Creating venv ..."
-    "$PYTHON_CMD" -m venv "$VENV_DIR"
+    if ! "$PYTHON_CMD" -m venv "$VENV_DIR"; then
+        echo ""
+        echo "ERROR: python -m venv failed (ensurepip). On Debian/Ubuntu:"
+        ver="$("$PYTHON_CMD" -c "import sys; print('{}.{}'.format(sys.version_info.major, sys.version_info.minor))")"
+        echo "  sudo apt install python${ver}-venv"
+        rm -rf "$VENV_DIR" 2>/dev/null || true
+        exit 1
+    fi
 else
     echo "[2/5] Venv exists: $VENV_DIR"
 fi
