@@ -64,7 +64,7 @@ def load_wikipedia_texts(max_articles: int = 50000) -> list:
     logger.info("Loading Wikipedia articles (max %d)...", max_articles)
     try:
         ds = load_dataset("wikipedia", "20220301.en", split="train",
-                          streaming=True, trust_remote_code=True)
+                          streaming=True)
         texts = []
         for i, ex in enumerate(ds):
             if i >= max_articles:
@@ -78,7 +78,7 @@ def load_wikipedia_texts(max_articles: int = 50000) -> list:
         logger.warning("Failed to load Wikipedia: %s. Using NQ passages instead.", e)
         try:
             nq = load_dataset("google-research-datasets/natural_questions", "default",
-                              split="train", streaming=True, trust_remote_code=True)
+                              split="train", streaming=True)
             texts = []
             for i, ex in enumerate(nq):
                 if i >= max_articles:

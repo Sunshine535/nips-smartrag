@@ -1,6 +1,6 @@
 policy:
   model: "Qwen/Qwen3.5-4B"
-    lora:
+  lora:
     r: 32
     lora_alpha: 64
     lora_dropout: 0.05

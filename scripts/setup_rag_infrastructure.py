@@ -70,7 +70,7 @@ def load_wiki_passages(path=None, max_passages=1000000):
     try:
         ds = load_dataset(
             "facebook/wiki_dpr", "psgs_w100.nq.no_index",
-            split="train", trust_remote_code=True,
+            split="train",
         )
         passages = []
         for i, ex in enumerate(ds):
@@ -230,9 +230,9 @@ def prepare_datasets(config, output_dir):
             split = ds_cfg.get("split", "validation")
 
             if subset:
-                ds = load_dataset(ds_cfg["dataset_id"], subset, split=split, trust_remote_code=True)
+                ds = load_dataset(ds_cfg["dataset_id"], subset, split=split)
             else:
-                ds = load_dataset(ds_cfg["dataset_id"], split=split, trust_remote_code=True)
+                ds = load_dataset(ds_cfg["dataset_id"], split=split)
 
             max_s = ds_cfg.get("max_samples", 2000)
             if len(ds) > max_s:
@@ -336,7 +336,7 @@ def verify_retrieval_quality(bm25, dense_index, encoder, passages, datasets_dir,
 
 def main():
     args = parse_args()
-        os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     with open(args.config) as f:
         config = yaml.safe_load(f)

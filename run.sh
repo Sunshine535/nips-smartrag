@@ -7,9 +7,6 @@ set -e
 PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJ_DIR"
 
-export UV_CACHE_DIR="/tmp/uv-cache-$(hostname)"
-mkdir -p "$UV_CACHE_DIR"
-
 echo "============================================================"
 echo " Starting full experiment pipeline"
 echo " Project: $(basename "$PROJ_DIR")"
@@ -26,10 +23,10 @@ else
 fi
 
 # Step 2: Quick dependency check
-python3 -c "import torch, transformers, peft, datasets" 2>/dev/null || {{
+python3 -c "import torch, transformers, peft, datasets" 2>/dev/null || {
     echo "[ERROR] Missing dependencies. Run: bash setup.sh"
     exit 1
-}}
+}
 
 # Step 3: Run all experiments with real-time output + log file
 echo ""
@@ -38,7 +35,7 @@ echo "  Log file: $PROJ_DIR/run.log"
 echo ""
 
 bash scripts/run_all_experiments.sh 2>&1 | tee "$PROJ_DIR/run.log"
-EXIT_CODE=${{PIPESTATUS[0]}}
+EXIT_CODE=${PIPESTATUS[0]}
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then

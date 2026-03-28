@@ -101,9 +101,9 @@ def load_training_queries(data_dir, config, max_per_dataset=2000):
             try:
                 subset = ds_cfg.get("subset")
                 if subset:
-                    ds = load_dataset(ds_cfg["dataset_id"], subset, split="train", trust_remote_code=True)
+                    ds = load_dataset(ds_cfg["dataset_id"], subset, split="train")
                 else:
-                    ds = load_dataset(ds_cfg["dataset_id"], split="train", trust_remote_code=True)
+                    ds = load_dataset(ds_cfg["dataset_id"], split="train")
                 max_s = min(len(ds), max_per_dataset)
                 ds = ds.shuffle(seed=42).select(range(max_s))
                 for ex in ds:

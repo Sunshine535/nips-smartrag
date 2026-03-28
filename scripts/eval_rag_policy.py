@@ -101,9 +101,9 @@ def load_eval_queries_hf(ds_cfg, max_samples):
         subset = ds_cfg.get("subset")
         split = ds_cfg.get("split", "validation")
         if subset:
-            ds = load_dataset(ds_cfg["dataset_id"], subset, split=split, trust_remote_code=True)
+            ds = load_dataset(ds_cfg["dataset_id"], subset, split=split)
         else:
-            ds = load_dataset(ds_cfg["dataset_id"], split=split, trust_remote_code=True)
+            ds = load_dataset(ds_cfg["dataset_id"], split=split)
 
         if len(ds) > max_samples:
             ds = ds.shuffle(seed=42).select(range(max_samples))

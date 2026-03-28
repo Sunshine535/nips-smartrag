@@ -257,9 +257,9 @@ def main():
                 subset = ds_cfg.get("subset")
                 split = ds_cfg.get("split", "validation")
                 if subset:
-                    ds = load_dataset(ds_cfg["dataset_id"], subset, split=split, trust_remote_code=True)
+                    ds = load_dataset(ds_cfg["dataset_id"], subset, split=split)
                 else:
-                    ds = load_dataset(ds_cfg["dataset_id"], split=split, trust_remote_code=True)
+                    ds = load_dataset(ds_cfg["dataset_id"], split=split)
 
                 max_s = min(len(ds), args.max_queries_per_dataset)
                 ds = ds.shuffle(seed=42).select(range(max_s))

@@ -42,9 +42,9 @@ def load_training_queries(config: dict):
         try:
             subset = ds_cfg.get("subset")
             if subset:
-                ds = load_dataset(ds_cfg["dataset_id"], subset, split="train", trust_remote_code=True)
+                ds = load_dataset(ds_cfg["dataset_id"], subset, split="train")
             else:
-                ds = load_dataset(ds_cfg["dataset_id"], split="train", trust_remote_code=True)
+                ds = load_dataset(ds_cfg["dataset_id"], split="train")
             max_s = ds_cfg.get("max_samples", 2000)
             if len(ds) > max_s:
                 ds = ds.shuffle(seed=42).select(range(max_s))

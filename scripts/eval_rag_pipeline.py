@@ -83,8 +83,8 @@ def load_eval_dataset(ds_cfg: dict):
     max_samples = ds_cfg.get("max_samples", 1000)
     logger.info("Loading dataset: %s", name)
     try:
-        ds = load_dataset(dataset_id, subset, split=split, trust_remote_code=True) if subset else \
-             load_dataset(dataset_id, split=split, trust_remote_code=True)
+        ds = load_dataset(dataset_id, subset, split=split) if subset else \
+             load_dataset(dataset_id, split=split)
         if len(ds) > max_samples:
             ds = ds.shuffle(seed=42).select(range(max_samples))
         return ds
