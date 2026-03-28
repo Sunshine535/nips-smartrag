@@ -184,8 +184,8 @@ def main():
     # Load retriever encoder
     encoder_name = config["retriever"]["base_model"]
     logger.info("Loading retriever encoder: %s", encoder_name)
-    ret_tokenizer = AutoTokenizer.from_pretrained(encoder_name, trust_remote_code=True)
-    encoder = AutoModel.from_pretrained(encoder_name, torch_dtype=torch.float16, trust_remote_code=True, device_map="auto")
+    ret_tokenizer = AutoTokenizer.from_pretrained(encoder_name)
+    encoder = AutoModel.from_pretrained(encoder_name, torch_dtype=torch.float16, device_map="auto")
     encoder.eval()
 
     # Load trained retriever head
@@ -221,9 +221,9 @@ def main():
     # Load generator
     gen_model_name = rag_cfg["generator_model"]
     logger.info("Loading generator: %s", gen_model_name)
-    gen_tokenizer = AutoTokenizer.from_pretrained(gen_model_name, trust_remote_code=True)
+    gen_tokenizer = AutoTokenizer.from_pretrained(gen_model_name)
     generator = AutoModelForCausalLM.from_pretrained(
-        gen_model_name, torch_dtype=torch.bfloat16, trust_remote_code=True, device_map="auto",
+        gen_model_name, torch_dtype=torch.bfloat16, device_map="auto",
     )
     generator.eval()
     if gen_tokenizer.pad_token is None:

@@ -312,12 +312,12 @@ def main():
     # Load GRPO policy
     policy_model_name = config["policy"]["model"]
     logger.info(f"Loading base model: {policy_model_name}")
-    tokenizer = AutoTokenizer.from_pretrained(policy_model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(policy_model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     policy_model = AutoModelForCausalLM.from_pretrained(
-        policy_model_name, torch_dtype=torch.bfloat16, trust_remote_code=True, device_map="auto",
+        policy_model_name, torch_dtype=torch.bfloat16, device_map="auto",
     )
 
     grpo_adapter = os.path.join(args.grpo_policy_dir, "adapter_config.json")

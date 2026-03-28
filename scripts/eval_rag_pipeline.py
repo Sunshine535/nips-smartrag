@@ -260,9 +260,9 @@ def main():
     if any(m in args.methods for m in ["dpr", "bge_base", "bge_graph"]):
         encoder_name = config["retriever"]["base_model"]
         logger.info("Loading encoder: %s", encoder_name)
-        tokenizer_ret = AutoTokenizer.from_pretrained(encoder_name, trust_remote_code=True)
+        tokenizer_ret = AutoTokenizer.from_pretrained(encoder_name)
         encoder = AutoModel.from_pretrained(encoder_name, torch_dtype=torch.float16,
-                                            trust_remote_code=True, device_map="auto")
+                                            device_map="auto")
         encoder.eval()
 
     if "dpr" in args.methods and encoder is not None:
@@ -304,9 +304,9 @@ def main():
     if not args.skip_generation:
         gen_name = config["rag"]["generator_model"]
         logger.info("Loading generator: %s", gen_name)
-        gen_tokenizer = AutoTokenizer.from_pretrained(gen_name, trust_remote_code=True)
+        gen_tokenizer = AutoTokenizer.from_pretrained(gen_name)
         generator = AutoModelForCausalLM.from_pretrained(
-            gen_name, torch_dtype=torch.bfloat16, trust_remote_code=True, device_map="auto")
+            gen_name, torch_dtype=torch.bfloat16, device_map="auto")
         generator.eval()
         if gen_tokenizer.pad_token is None:
             gen_tokenizer.pad_token = gen_tokenizer.eos_token

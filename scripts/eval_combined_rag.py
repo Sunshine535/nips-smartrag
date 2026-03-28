@@ -87,7 +87,7 @@ def load_datasets(config, max_samples):
     for ds_cfg in eval_datasets:
         name = ds_cfg["name"]
         try:
-            kwargs = {"split": ds_cfg.get("split", "validation")}
+            kwargs = {"split": ds_cfg.get("split", "validation"), "trust_remote_code": True}
             if "subset" in ds_cfg:
                 ds = load_dataset(ds_cfg["dataset_id"], ds_cfg["subset"], **kwargs)
             else:

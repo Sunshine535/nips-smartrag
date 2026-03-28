@@ -86,7 +86,7 @@ def load_training_data(config: dict, tokenizer):
 
     try:
         nq = load_dataset("google-research-datasets/natural_questions", "default",
-                          split="train", streaming=True)
+                          split="train", streaming=True, trust_remote_code=True)
         count = 0
         for ex in nq:
             if count >= 50000:

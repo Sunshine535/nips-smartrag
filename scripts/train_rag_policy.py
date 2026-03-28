@@ -193,7 +193,7 @@ def main():
         logger.info("Policy model: %s", policy_model_name)
         logger.info("World size: %d", world_size)
 
-    tokenizer = AutoTokenizer.from_pretrained(policy_model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(policy_model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -201,7 +201,7 @@ def main():
         policy_model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2",
+        attn_implementation="sdpa",
         low_cpu_mem_usage=True,
     )
     policy_model = policy_model.to(device)

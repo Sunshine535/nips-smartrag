@@ -8,7 +8,7 @@ echo " Environment Setup (venv + pip + PyTorch 2.10 + CUDA 12.8)"
 echo "============================================"
 
 PYTHON_CMD=""
-for try in python3.12 python3.11 python3.10 python3; do
+for try in python3.10 python3.11 python3.12 python3; do
     if command -v "$try" &>/dev/null; then
         PYTHON_CMD="$try"
         break
