@@ -3,6 +3,7 @@
 Base encoder: BAAI/bge-large-en-v1.5. Hard negatives via BM25."""
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -20,6 +21,39 @@ from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warm
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def save_training_checkpoint(path, model, optimizer, epoch, step, **extra):
+    torch.save(
+        {
+            "epoch": epoch,
+            "step": step,
+            "model_state_dict": _unwrap_model(model).state_dict(),
+            "optimizer_state_dict": optimizer.state_dict() if optimizer else None,
+            **extra,
+        },
+        path,
+    )
+
+
+def load_training_checkpoint(path, model, optimizer=None):
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    _unwrap_model(model).load_state_dict(ckpt["model_state_dict"])
+    if optimizer and ckpt.get("optimizer_state_dict"):
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+    return ckpt.get("epoch", 0), ckpt.get("step", 0)
+
+
+def find_latest_checkpoint(output_dir, pattern="checkpoint_*.pt"):
+    ckpts = sorted(
+        glob.glob(os.path.join(output_dir, pattern)),
+        key=os.path.getmtime,
+    )
+    return ckpts[-1] if ckpts else None
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -224,6 +258,12 @@ def main():
     parser.add_argument("--synonym_weight", type=float, default=0.3)
     parser.add_argument("--polysemy_weight", type=float, default=0.2)
     parser.add_argument("--local_rank", type=int, default=-1)
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default="auto",
+        help='Resume: path to a .pt checkpoint, "auto" for latest checkpoint_*.pt, or "none" to disable.',
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -302,12 +342,42 @@ def main():
     scaler = torch.cuda.amp.GradScaler()
     retriever_module = retriever.module if hasattr(retriever, "module") else retriever
 
+    resume_path = None
+    rfc = (args.resume_from_checkpoint or "").strip().lower()
+    if rfc and rfc != "none":
+        if rfc == "auto":
+            resume_path = find_latest_checkpoint(args.output_dir)
+            if resume_path and is_main:
+                logger.info("Auto-resume: latest checkpoint %s", resume_path)
+        elif os.path.isfile(args.resume_from_checkpoint):
+            resume_path = args.resume_from_checkpoint
+        elif is_main:
+            logger.warning("resume_from_checkpoint path not found: %s", args.resume_from_checkpoint)
+
+    start_epoch = 0
+    global_step = 0
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location="cpu", weights_only=False)
+        _unwrap_model(retriever).load_state_dict(ckpt["model_state_dict"])
+        enc_sd = ckpt.get("encoder_state_dict")
+        if enc_sd is not None:
+            _unwrap_model(encoder).load_state_dict(enc_sd)
+        if ckpt.get("optimizer_state_dict"):
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if ckpt.get("scheduler_state_dict"):
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if ckpt.get("scaler_state_dict"):
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        start_epoch = int(ckpt.get("epoch", 0))
+        global_step = int(ckpt.get("step", 0))
+        if is_main:
+            logger.info("Resumed from %s: start_epoch=%d global_step=%d", resume_path, start_epoch, global_step)
+
     logger.info("Starting training: %d epochs, %d steps/epoch", train_cfg["num_train_epochs"], len(dataloader))
     logger.info("Loss weights: synonym=%.2f, polysemy=%.2f, laplacian=%.2f",
                 args.synonym_weight, args.polysemy_weight, ret_cfg["graph_laplacian_weight"])
 
-    global_step = 0
-    for epoch in range(train_cfg["num_train_epochs"]):
+    for epoch in range(start_epoch, train_cfg["num_train_epochs"]):
         if sampler:
             sampler.set_epoch(epoch)
         retriever.train()
@@ -374,7 +444,20 @@ def main():
                     ckpt_dir = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     os.makedirs(ckpt_dir, exist_ok=True)
                     torch.save(retriever_module.state_dict(), os.path.join(ckpt_dir, "retriever.pt"))
-                    torch.save(encoder.state_dict(), os.path.join(ckpt_dir, "encoder.pt"))
+                    torch.save(
+                        _unwrap_model(encoder).state_dict(),
+                        os.path.join(ckpt_dir, "encoder.pt"),
+                    )
+                    save_training_checkpoint(
+                        os.path.join(args.output_dir, f"checkpoint_step_{global_step}.pt"),
+                        retriever,
+                        optimizer,
+                        epoch,
+                        global_step,
+                        encoder_state_dict=_unwrap_model(encoder).state_dict(),
+                        scheduler_state_dict=scheduler.state_dict(),
+                        scaler_state_dict=scaler.state_dict(),
+                    )
 
         if is_main:
             n = max(len(dataloader), 1)
@@ -382,6 +465,16 @@ def main():
                         epoch, epoch_losses["total"] / n, epoch_losses["info_nce"] / n,
                         epoch_losses["synonym"] / n, epoch_losses["polysemy"] / n,
                         epoch_losses["laplacian"] / n)
+            save_training_checkpoint(
+                os.path.join(args.output_dir, f"checkpoint_epoch_{epoch}.pt"),
+                retriever,
+                optimizer,
+                epoch + 1,
+                global_step,
+                encoder_state_dict=_unwrap_model(encoder).state_dict(),
+                scheduler_state_dict=scheduler.state_dict(),
+                scaler_state_dict=scaler.state_dict(),
+            )
 
     if is_main:
         logger.info("Saving final model to %s", args.output_dir)

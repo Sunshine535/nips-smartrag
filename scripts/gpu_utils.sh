@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================================
-# Shared GPU utilities for all NeurIPS 2026 projects
+# Shared GPU utilities for NeurIPS 2026 projects
 # Source this file in any experiment script:
-#   source "$(dirname "$0")/../_shared/gpu_utils.sh" 2>/dev/null || source "$(dirname "$0")/gpu_utils.sh"
+#   source "$(dirname "$0")/gpu_utils.sh"
 # ============================================================================
 
 detect_gpus() {
@@ -12,8 +12,9 @@ detect_gpus() {
     fi
 
     if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
-        export NUM_GPUS=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
-        local first_gpu=$(echo "$CUDA_VISIBLE_DEVICES" | cut -d',' -f1)
+        local IFS=','
+        local -a gpu_arr=($CUDA_VISIBLE_DEVICES)
+        export NUM_GPUS=${#gpu_arr[@]}
     else
         export NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
         if [ "$NUM_GPUS" -eq 0 ]; then
@@ -26,12 +27,11 @@ detect_gpus() {
             gpu_ids="${gpu_ids}${i}"
         done
         export CUDA_VISIBLE_DEVICES="$gpu_ids"
-        local first_gpu=0
     fi
 
-    export GPU_MEM_MIB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i "${first_gpu}" 2>/dev/null | tr -d ' ')
+    local first_gpu="${CUDA_VISIBLE_DEVICES%%,*}"
+    export GPU_MEM_MIB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i "$first_gpu" 2>/dev/null | tr -d ' ')
 
-    # Determine if we can run large models
     if [ "${GPU_MEM_MIB:-0}" -ge 70000 ]; then
         export GPU_CLASS="a100_80g"
     elif [ "${GPU_MEM_MIB:-0}" -ge 35000 ]; then
@@ -52,24 +52,20 @@ detect_gpus() {
     echo "============================================"
 }
 
-# Select torchrun command based on GPU count
 get_torchrun_cmd() {
     local nproc="${1:-$NUM_GPUS}"
     echo "torchrun --nproc_per_node=$nproc --master_port=$(( RANDOM % 10000 + 20000 ))"
 }
 
-# Select accelerate launch command
 get_accelerate_cmd() {
     local nproc="${1:-$NUM_GPUS}"
     echo "accelerate launch --num_processes=$nproc --mixed_precision=bf16"
 }
 
-# Select per_device_batch_size based on GPU memory and model size
 auto_batch_size() {
-    local model_params_b="${1:-9}"  # model size in billions
-    local base_bs="${2:-4}"        # base batch size for 80GB GPU with 9B model
+    local model_params_b="${1:-9}"
+    local base_bs="${2:-4}"
     local mem=${GPU_MEM_MIB:-80000}
-
     local scale=$(echo "$mem / 80000 * 9 / $model_params_b" | bc -l 2>/dev/null || echo "1.0")
     local bs=$(echo "$base_bs * $scale" | bc 2>/dev/null | cut -d. -f1)
     bs=${bs:-$base_bs}
@@ -78,17 +74,30 @@ auto_batch_size() {
     echo "$bs"
 }
 
-# Generate accelerate config YAML
+gpu_at_index() {
+    IFS=',' read -ra _arr <<< "$CUDA_VISIBLE_DEVICES"
+    echo "${_arr[$(($1 % ${#_arr[@]}))]}"
+}
+
+gpu_range() {
+    local start=$1 count=$2
+    IFS=',' read -ra _arr <<< "$CUDA_VISIBLE_DEVICES"
+    local result=""
+    for ((i=start; i<start+count && i<${#_arr[@]}; i++)); do
+        [ -n "$result" ] && result="${result},"
+        result="${result}${_arr[$i]}"
+    done
+    echo "$result"
+}
+
 generate_accelerate_config() {
     local output_path="${1:-accelerate_config.yaml}"
     local nproc="${2:-$NUM_GPUS}"
-
     cat > "$output_path" <<YAML
 compute_environment: LOCAL_MACHINE
 distributed_type: MULTI_GPU
 downcast_bf16: 'no'
 machine_rank: 0
-main_training_tp_size: 1
 mixed_precision: bf16
 num_machines: 1
 num_processes: ${nproc}
@@ -102,11 +111,9 @@ YAML
     echo "  Generated accelerate config: $output_path (${nproc} GPUs)"
 }
 
-# Generate FSDP accelerate config for large models
 generate_fsdp_config() {
     local output_path="${1:-fsdp_config.yaml}"
     local nproc="${2:-$NUM_GPUS}"
-
     cat > "$output_path" <<YAML
 compute_environment: LOCAL_MACHINE
 distributed_type: FSDP
@@ -122,7 +129,6 @@ fsdp_config:
   fsdp_sync_module_states: true
   fsdp_use_orig_params: true
 machine_rank: 0
-main_training_tp_size: 1
 mixed_precision: bf16
 num_machines: 1
 num_processes: ${nproc}
@@ -136,10 +142,8 @@ YAML
     echo "  Generated FSDP config: $output_path (${nproc} GPUs)"
 }
 
-# Common environment setup
 setup_env() {
-        export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
-    export TRANSFORMERS_CACHE="${HF_HOME}/hub"
+    export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TOKENIZERS_PARALLELISM=false
     export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-0}"
     export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-0}"
@@ -147,33 +151,16 @@ setup_env() {
     export OMP_NUM_THREADS=8
 }
 
-gpu_at_index() {
-    IFS=',' read -ra _arr <<< "$CUDA_VISIBLE_DEVICES"
-    echo "${_arr[$1]:-$1}"
-}
-
-gpu_range() {
-    local start=$1 count=$2
-    IFS=',' read -ra _arr <<< "$CUDA_VISIBLE_DEVICES"
-    local result=""
-    for ((i=start; i<start+count && i<${#_arr[@]}; i++)); do
-        [ -n "$result" ] && result="${result},"
-        result="${result}${_arr[$i]}"
-    done
-    echo "$result"
-}
-
 auto_setup() {
     setup_env
     detect_gpus
 }
 
-# Run if sourced directly for testing
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     auto_setup
     echo ""
     echo "Torchrun cmd : $(get_torchrun_cmd)"
     echo "Accelerate   : $(get_accelerate_cmd)"
     echo "Batch size 9B: $(auto_batch_size 9 4)"
-    echo "Batch size 27B: $(auto_batch_size 27 2)"
+    echo "GPU at idx 0 : $(gpu_at_index 0)"
 fi

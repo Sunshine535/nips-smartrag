@@ -107,6 +107,17 @@ run_py() {
 # -----------------------------------------------------------------------------
 auto_setup
 
+PHASE_MARKER_DIR="$PROJECT_ROOT/results/.phase_markers"
+mkdir -p "$PHASE_MARKER_DIR"
+FORCE_RERUN="${FORCE_RERUN:-0}"
+
+phase_done() { touch "$PHASE_MARKER_DIR/phase_${1}.done"; echo "[PHASE $1] Completed at $(date)"; }
+is_phase_done() {
+    [[ "$FORCE_RERUN" == "1" ]] && return 1
+    [[ -f "$PHASE_MARKER_DIR/phase_${1}.done" ]] && echo "[PHASE $1] Already completed. Skipping. (FORCE_RERUN=1 to override)" && return 0
+    return 1
+}
+
 echo ""
 echo "============================================"
 echo " SmartRAG full pipeline"
@@ -123,74 +134,83 @@ echo ""
 # -----------------------------------------------------------------------------
 # Phase 0: RAG infrastructure — BM25 corpora + dense FAISS index
 # -----------------------------------------------------------------------------
-if should_run_phase 0; then
+if should_run_phase 0 && ! is_phase_done 0; then
   run_py scripts/setup_rag_infrastructure.py "${QUICK_PHASE0[@]}"
+  phase_done 0
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 1: Synonym / lexical graph for graph-supervised contrastive signals
 # -----------------------------------------------------------------------------
-if should_run_phase 1; then
+if should_run_phase 1 && ! is_phase_done 1; then
   run_py scripts/build_synonym_graph.py "${QUICK_PHASE1[@]}"
+  phase_done 1
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 2: Graph-contrastive retriever training (GraphConRAG)
 # -----------------------------------------------------------------------------
-if should_run_phase 2; then
+if should_run_phase 2 && ! is_phase_done 2; then
   TORCHRUN="$(get_torchrun_cmd)"
   # shellcheck disable=SC2086
   echo "============================================================================"
   echo " Phase 2: ${TORCHRUN} scripts/train_contrastive_retriever.py ..."
   echo "============================================================================"
   ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_contrastive_retriever.py"
+  phase_done 2
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 3: Retriever comparison — BM25, DPR, BGE, BGE+Graph
 # -----------------------------------------------------------------------------
-if should_run_phase 3; then
+if should_run_phase 3 && ! is_phase_done 3; then
   run_py scripts/eval_rag_pipeline.py
+  phase_done 3
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 4: Oracle (upper-bound) retrieval policy for supervised references
 # -----------------------------------------------------------------------------
-if should_run_phase 4; then
+if should_run_phase 4 && ! is_phase_done 4; then
   run_py scripts/train_oracle_policy.py "${QUICK_PHASE4[@]}"
+  phase_done 4
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 5: GRPO-trained cost-aware policy (UniRAG-Policy)
 # -----------------------------------------------------------------------------
-if should_run_phase 5; then
+if should_run_phase 5 && ! is_phase_done 5; then
   TORCHRUN="$(get_torchrun_cmd)"
   # shellcheck disable=SC2086
   echo "============================================================================"
   echo " Phase 5: ${TORCHRUN} scripts/train_grpo_policy.py ..."
   echo "============================================================================"
   ${TORCHRUN} "${PROJECT_ROOT}/scripts/train_grpo_policy.py"
+  phase_done 5
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 6: Policy evaluation — no-retrieve, always-retrieve, oracle, learned
 # -----------------------------------------------------------------------------
-if should_run_phase 6; then
+if should_run_phase 6 && ! is_phase_done 6; then
   run_py scripts/eval_rag_policy.py
+  phase_done 6
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 7: End-to-end — graph-enhanced retriever + adaptive policy
 # -----------------------------------------------------------------------------
-if should_run_phase 7; then
+if should_run_phase 7 && ! is_phase_done 7; then
   run_py scripts/eval_combined_rag.py
+  phase_done 7
 fi
 
 # -----------------------------------------------------------------------------
 # Phase 8: Ablations (graph edges, contrastive negatives, policy reward shaping, etc.)
 # -----------------------------------------------------------------------------
-if should_run_phase 8; then
+if should_run_phase 8 && ! is_phase_done 8; then
   run_py scripts/run_ablations.py
+  phase_done 8
 fi
 
 echo ""

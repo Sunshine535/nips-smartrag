@@ -10,6 +10,7 @@ Tracks: accuracy, avg cost, action distribution over training.
 """
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -42,6 +43,39 @@ logging.basicConfig(
 logger = logging.getLogger("train_grpo_policy")
 
 
+def _unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def save_training_checkpoint(path, model, optimizer, epoch, step, **extra):
+    torch.save(
+        {
+            "epoch": epoch,
+            "step": step,
+            "model_state_dict": _unwrap_model(model).state_dict(),
+            "optimizer_state_dict": optimizer.state_dict() if optimizer else None,
+            **extra,
+        },
+        path,
+    )
+
+
+def load_training_checkpoint(path, model, optimizer=None):
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    _unwrap_model(model).load_state_dict(ckpt["model_state_dict"])
+    if optimizer and ckpt.get("optimizer_state_dict"):
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+    return ckpt.get("epoch", 0), ckpt.get("step", 0)
+
+
+def find_latest_checkpoint(output_dir, pattern="checkpoint_*.pt"):
+    ckpts = sorted(
+        glob.glob(os.path.join(output_dir, pattern)),
+        key=os.path.getmtime,
+    )
+    return ckpts[-1] if ckpts else None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train RAG policy with GRPO + cost annealing")
     parser.add_argument("--config", type=str, default="configs/rag_config.yaml")
@@ -62,6 +96,12 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--local_rank", type=int, default=-1)
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default="auto",
+        help='Resume: path to a .pt checkpoint, "auto" for latest checkpoint_*.pt, or "none" to disable.',
+    )
     return parser.parse_args()
 
 
@@ -232,7 +272,7 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-        os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
@@ -310,10 +350,45 @@ def main():
     )
 
     total_steps = (len(queries) // batch_size) * num_epochs
-    training_log = []
-    global_step = 0
 
-    for epoch in range(num_epochs):
+    resume_path = None
+    rfc = (args.resume_from_checkpoint or "").strip().lower()
+    if rfc and rfc != "none":
+        if rfc == "auto":
+            resume_path = find_latest_checkpoint(args.output_dir)
+            if resume_path and is_main:
+                logger.info("Auto-resume: latest checkpoint %s", resume_path)
+        elif os.path.isfile(args.resume_from_checkpoint):
+            resume_path = args.resume_from_checkpoint
+        elif is_main:
+            logger.warning("resume_from_checkpoint path not found: %s", args.resume_from_checkpoint)
+
+    start_epoch = 0
+    global_step = 0
+    if resume_path:
+        epoch_res, step_res = load_training_checkpoint(resume_path, policy_model, optimizer)
+        start_epoch = int(epoch_res)
+        global_step = int(step_res)
+        if is_main:
+            logger.info(
+                "Resumed from %s: start_epoch=%d global_step=%d",
+                resume_path,
+                start_epoch,
+                global_step,
+            )
+
+    training_log = []
+    if resume_path and is_main:
+        log_path = os.path.join(args.output_dir, "training_log.json")
+        if os.path.isfile(log_path):
+            try:
+                with open(log_path) as f:
+                    training_log = json.load(f)
+                training_log = [e for e in training_log if e.get("epoch", 0) < start_epoch]
+            except (json.JSONDecodeError, OSError):
+                training_log = []
+
+    for epoch in range(start_epoch, num_epochs):
         random.shuffle(queries)
         epoch_rewards = []
         epoch_costs = []
@@ -411,6 +486,13 @@ def main():
                 save_model = policy_model.module if hasattr(policy_model, "module") else policy_model
                 save_model.save_pretrained(ckpt_dir)
                 tokenizer.save_pretrained(ckpt_dir)
+                save_training_checkpoint(
+                    os.path.join(args.output_dir, f"checkpoint_step_{global_step}.pt"),
+                    policy_model,
+                    optimizer,
+                    epoch,
+                    global_step,
+                )
 
         total_actions = sum(action_counts.values())
         action_dist = {k: v / max(total_actions, 1) for k, v in action_counts.items()}
@@ -433,6 +515,13 @@ def main():
                 f"λ={cost_lambda:.3f} ==="
             )
             logger.info(f"  Action dist: {action_dist}")
+            save_training_checkpoint(
+                os.path.join(args.output_dir, f"checkpoint_epoch_{epoch}.pt"),
+                policy_model,
+                optimizer,
+                epoch + 1,
+                global_step,
+            )
 
     if is_main:
         save_model = policy_model.module if hasattr(policy_model, "module") else policy_model
